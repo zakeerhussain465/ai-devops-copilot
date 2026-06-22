@@ -1,0 +1,227 @@
+
+====================
+ARCHITECTURE
+====================
+
+### Architecture Diagram Description
+
+The architecture involves deploying a MERN (MongoDB, Express.js, React.js, Node.js) application using various AWS services for scalability and security. The key components are:
+
+1. **AWS VPC**: The backbone network that connects all the resources.
+2. **Amazon EC2 Instances**: Running both the backend (Node.js/Express.js) and frontend (React.js) applications.
+3. **Amazon RDS with MongoDB**: For storing application data securely.
+4. **Amazon S3**: Used for static content hosting, such as images or other non-sensitive assets.
+5. **AWS Elastic Load Balancer (ELB)**: Distributes traffic to multiple EC2 instances for high availability and load balancing.
+6. **Amazon Route 53**: DNS management for domain name resolution.
+
+### AWS Services Used
+
+- **Amazon VPC**
+- **Amazon EC2**
+- **Amazon RDS with MongoDB**
+- **Amazon S3**
+- **AWS Elastic Load Balancer (ELB)**
+- **Amazon Route 53**
+
+### Network Flow
+
+1. **User Request**: The user requests the application from a domain name (e.g., `myapp.com`) via DNS routing to an ELB.
+2. **Load Balancing**: The request is routed through the ELB, which distributes traffic to multiple backend EC2 instances for both frontend and backend services.
+3. **Backend Processing**:
+   - **Node.js/Express.js Server**: Processes API requests from the React.js frontend.
+   - **MongoDB**: Stores and retrieves data as needed by the application.
+4. **Frontend Rendering**:
+   - **React.js Application**: Dynamically renders the UI based on backend responses.
+5. **Static Content Delivery**:
+   - **S3 Bucket**: Hosts static assets like images, CSS, or JavaScript files that are served directly from S3 to optimize performance.
+6. **Data Storage and Backup**:
+   - **RDS MongoDB**: Manages database transactions and ensures data integrity with automatic backups.
+7. **Security and Monitoring**:
+   - **VPC Security Groups**: Control access to instances based on rules.
+   - **AWS CloudWatch**: Monitors application health, performance metrics, and logs.
+
+This architecture ensures that the MERN application is scalable, secure, and resilient.
+
+====================
+DOCKER
+====================
+
+====================
+DOCKERFILE
+====================
+```dockerfile
+# Node.js runtime image
+FROM node:14-alpine as builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy package.json and yarn.lock
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy project files
+COPY . .
+
+# Build application
+RUN npm run build
+
+
+# Production image
+FROM nginx:alpine
+
+# Use production environment variables if any
+ENV NODE_ENV=production
+
+# Set working directory
+WORKDIR /app
+
+# Copy built assets from builder stage
+COPY --from=builder /app/build build
+
+# Expose port 80
+EXPOSE 80
+
+# Default command to run nginx
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+====================
+DOCKER_COMPOSE
+====================
+```yaml
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:80"
+    environment:
+      NODE_ENV: production
+      # Add any other required env vars here
+
+  mongo:
+    image: mongo:latest
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "27017:27017"
+
+volumes:
+  mongo-data:
+```
+
+====================
+TERRAFORM
+====================
+
+====================
+MAIN_TF
+====================
+```hcl
+provider "aws" {
+  region = "us-west-2"
+}
+
+resource "aws_instance" "mern_app" {
+  ami           = "ami-0c55b1dfexample"
+  instance_type = "t2.micro"
+
+  security_groups = [aws_security_group.mern_sg.id]
+
+  user_data = <<-EOF
+              #!/bin/bash
+              yum update -y
+              yum install -y nodejs
+              npm install -g pm2
+              git clone https://github.com/yourusername/mern-app.git /home/ec2-user/mern-app
+              cd /home/ec2-user/mern-app
+              npm install
+              npm run build
+              nohup pm2 start ./server.js &
+              EOF
+
+  tags = {
+    Name = "MERNApp"
+  }
+}
+
+resource "aws_security_group" "mern_sg" {
+  name        = "mern-sg"
+  description = "Allow HTTP, HTTPS and SSH access"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+output "instance_public_ip" {
+  value = aws_instance.mern_app.public_ip_address
+}
+```
+
+====================
+CI/CD
+====================
+
+```yaml
+name: MERN App Deployment
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build frontend
+        run: npm run build
+      - name: Test application
+        run: npm test
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Deploy to AWS
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          S3_BUCKET_NAME: my-mern-app-bucket
+        run: |
+          aws s3 sync ./build s3://${S3_BUCKET_NAME}/
+```
